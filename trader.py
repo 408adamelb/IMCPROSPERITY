@@ -56,6 +56,39 @@ class Trader:
             # if (best)
             print("SELL", str(best_bid_amount) + "x", next_bid[best_bid_idx])
             orders.append(Order(product, next_bid[best_bid_idx], best_bid_amount))
+            for product2 in state.order_depths:
+                order_depth: OrderDepth = state.order_depths[product]
+            
+                best_ask, best_ask_amount = list(order_depth.sell_orders.items())[1]
+                best_bid, best_bid_amount = list(order_depth.buy_orders.items())[1]
+                mid = (best_ask  + best_bid )/2
+
+            if (state.timestamp > 1000):
+                prices = state.traderData.split(" ")[:-1]
+                asks = np.array([])
+                asks.append(best_ask)
+                bids = np.array([])
+                bids.append(best_bid)
+                mids = np.arra([])
+            
+                for index, price in enumerate(prices):
+                    if index % 2 == 0:
+                        asks.append(float(price))
+
+                    else:
+                        bids.append(float(price))
+                mids = asks+bids /2
+                if(mid[state.timestamp] + mids[state.timestamp-1])/2 > mids[state.timestamp-1]:
+
+                    orders.append(Order(product, mids[state.timestamp-1] +2,-3 ))
+                    orders.append(Order(product, mids[state.timestamp-1] +1,-2 ))
+                    orders.append(Order(product, mids[state.timestamp-1] +2,-1 ))
+                else:
+                    orders.append(Order(product, mids[state.timestamp-1] -2,3 ))
+                    orders.append(Order(product, mids[state.timestamp-1] -1,2 ))
+                    orders.append(Order(product, mids[state.timestamp-1] ,1 ))
+
+            # mid_price = (best_ask + best_bid) / 2
             
         # if (state.timestamp > 1000):
         #     for index, price in enumerate(prices):
