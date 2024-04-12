@@ -2,6 +2,7 @@ from datamodel import OrderDepth, UserId, TradingState, Order
 import collections
 from typing import List
 import numpy as np
+import math
 import string
 
 
@@ -148,20 +149,43 @@ class Trader:
         coefficients = transform.dwt(prices, level=level)
         reconstructed_signal = np.array(transform.idwt(coefficients, level=level))
         return reconstructed_signal
+    
+    # COPIED FROM STANFORD
+    def values_extract(self, order_dict, buy=0):
+        tot_vol = 0
+        best_val = -1
+        mxvol = -1
+
+        for ask, vol in order_dict.items():
+            if(buy==0):
+                vol *= -1
+            tot_vol += vol
+            if tot_vol > mxvol:
+                mxvol = vol
+                best_val = ask
         
+        return best_val
     
     def run(self, state: TradingState):
         result = {}
+        
         tot_ask_vol = {}
         tot_bid_vol = {}
+        
         tot_ask_price_vol = {}
         tot_bid_price_vol = {}
+        
+        next_ask_prices = {}
+        next_bid_prices = {}
+        
         next_mid_prices = {}
         cur_mid_prices = {}
+        
         sell_orders = {}
         buy_orders = {}
         
-        orders: List[Order] = []
+        best_buy = {}
+        best_sell = {}
         
         for product in state.order_depths:
             tot_ask_vol[product] = 0
@@ -169,6 +193,9 @@ class Trader:
             
             tot_ask_price_vol[product] = 0
             tot_bid_price_vol[product] = 0
+            
+            next_ask_prices[product] = 0
+            next_bid_prices[product] = 0
             
             next_mid_prices[product] = 0
             cur_mid_prices[product] = 0
@@ -185,16 +212,77 @@ class Trader:
                 tot_bid_price_vol[product] += (bid_price * bid_vol)
                 tot_bid_vol[product] += bid_vol
                 
-            next_mid_prices[product] = ((tot_ask_price_vol[product]/tot_ask_vol[product])+(tot_bid_price_vol[product]/tot_bid_vol[product]))/2
+            next_bid_prices[product] = tot_bid_price_vol[product]/tot_bid_vol[product]
+            next_ask_prices[product] = tot_ask_price_vol[product]/tot_ask_vol[product]
+            
+            next_mid_prices[product] = (next_ask_prices[product] + next_bid_prices[product])/2
             cur_mid_prices[product] = (next(iter(sell_orders[product])) + next(iter(buy_orders[product])))/2
             
         for product in next_mid_prices:
-            if (next_mid_prices[product] < cur_mid_prices[product]):
-                # BUY LOW
-                orders.append(Order(product, int(next_mid_prices[product]), -1))
-            elif (next_mid_prices[product] > cur_mid_prices[product]):
-                # SELL HIGH
-                orders.append(Order(product, int(next_mid_prices[product]), 1))
+            orders: List[Order] = []
+            if (product == "AMETHYSTS"):
+                acc_price = 10000
+            else:
+                acc_price = int(next_mid_prices[product])
+            
+            cur_pos = 0
+            CUR_POS_STATIC = 0
+            if product in state.position:
+                CUR_POS_STATIC = state.position[product]
+                cur_pos = state.position[product]
+            
+            for ask_price, ask_vol in list(sell_orders[product].items()):
+                if ((ask_price < acc_price) or ((CUR_POS_STATIC < 0) and (ask_price == acc_price) and cur_pos < 20)):
+                    buy_vol = min(-ask_vol, 20-cur_pos)
+                    cur_pos += buy_vol
+                    orders.append(Order(product, ask_price, buy_vol))
+                    
+            best_sell = self.values_extract(sell_orders[product])
+            best_buy = self.values_extract(buy_orders[product], 1)
+            
+            undercut_buy = best_buy + 1
+            undercut_sell = best_sell - 1
+            
+            our_bid = min(undercut_buy, acc_price-1)
+            our_ask = min(undercut_sell,acc_price+1)
+            
+            if (cur_pos < 20) and (CUR_POS_STATIC < 0):
+                num = min(40, 20 - cur_pos)
+                orders.append(Order(product, min(undercut_buy+1, acc_price-1), num))
+                cur_pos += num
+
+            if (cur_pos < 20) and (CUR_POS_STATIC > 15):
+                num = min(40, 20 - cur_pos)
+                orders.append(Order(product, min(undercut_buy-1, acc_price-1), num))
+                cur_pos += num
+
+            if cur_pos < 20:
+                num = min(40, 20 - cur_pos)
+                orders.append(Order(product, our_bid, num))
+                cur_pos += num
+            
+            cur_pos = CUR_POS_STATIC
+            
+            for bid_price, bid_vol in list(buy_orders[product].items()):
+                if ((bid_price > acc_price) or ((CUR_POS_STATIC > 0) and (bid_price == acc_price) and cur_pos > -20)):
+                    sell_vol = max(-bid_vol, -20-cur_pos)
+                    cur_pos += sell_vol
+                    orders.append(Order(product, bid_price, sell_vol))
+                    
+            if (cur_pos > -20) and (CUR_POS_STATIC > 0):
+                num = max(-40, -20-cur_pos)
+                orders.append(Order(product, max(undercut_sell-1, acc_price+1), num))
+                cur_pos += num
+
+            if (cur_pos > -20) and (CUR_POS_STATIC < -15):
+                num = max(-40, -20-cur_pos)
+                orders.append(Order(product, max(undercut_sell+1, acc_price+1), num))
+                cur_pos += num
+
+            if cur_pos > -20:
+                num = max(-40, -20-cur_pos)
+                orders.append(Order(product, our_ask, num))
+                cur_pos += num
             
             result[product] = orders
         
